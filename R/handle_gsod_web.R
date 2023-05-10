@@ -1,7 +1,7 @@
 #' @title Download climate data from the Global Summary of the Day database (faster)
 #'
 #' @description
-#' This functions main features are downloading and converting climate data from
+#' This function's main features are downloading and converting climate data from
 #'    the Global Summary of the Day database (GSOD) from the National Climatic
 #'    Data Centre (NCDC) of the National Oceanic and Atmospheric Administration
 #'    (NOAA).
@@ -20,19 +20,19 @@
 #'       `time_interval` needs to be set to a desired timeinterval as in the
 #'       previous step.
 #'    3. Converting the raw data into a suitable `chillR` format by setting
-#'       only `action = raw_data`.
+#'       the `action` parameter equal to the raw data set.(`action = raw_data`)
 #'
 #'    There are many other parameters that can be set - see the Arguments
 #'    section for more information.
 #'
 #' @param action Can be set to:
 #'
-#'    1. `list_stations` to download a list of stations in proximity of a
+#'    1. "`list_stations`" to download a list of stations in proximity of a
 #'       location.
-#'    2. `download_weather` to download climate data for a specific time
+#'    2. "`download_weather`" to download climate data for a specific time
 #'       interval from one or more stations listed in the downloaded stations
 #'       list.
-#'    3. `delete` to clean up the path used for downloading. Can be used with
+#'    3. "`delete`" to clean up the path used for downloading. Can be used with
 #'       `clean_up = "all"` to delete the entire path, or with
 #'       `clean_up = "station"` in combination with the parameter `location` set
 #'        to the station `chillR_code` to be deleted, as used in
@@ -49,8 +49,9 @@
 #'    Can also be a numeric vector with only one element, if used with
 #'    `end_at_present = TRUE`.
 #' @param path Default value is "climate_data". Here the path for the downloads
-#'    can be set manually if desired. Use `getwd()` and `setwd()` if you are not
-#'    sure what your current working directory is.
+#'    can be set manually if desired. The function will then concatenate this
+#'    string with the current working directory path. Use `getwd()` and
+#'    `setwd()` if you are not sure what your current working directory is.
 #' @param end_at_present Default is `FALSE`. Can be set to `TRUE`, if only one
 #'    element is provided in `time_interval`. In this case the second value will
 #'    be exacted from the system time.
@@ -92,6 +93,39 @@
 #'    helpful for debugging problems. "`quiet`" will give no console updates.
 #'
 #' @details
+#' This function is an alternative to the original `handle_gsod()` function from
+#'    the `chillR` package and strives to run faster and have some additional
+#'    tweaks. The increased speed stems mainly from saving the data to the disk
+#'    and also loading it from there if already present. It will only
+#'    re-download ALL the data if the parameter `update_all` is set to `TRUE`.
+#'    One major difference between this function and the original is that
+#'    the downloaded data is initially kept in its raw form (as found in the
+#'    GSOD database). This allows for own manipulation of the data, but keep in
+#'    mind that the units are not yet converted to SI. Setting the `action`
+#'    parameter to the raw data set and also setting `drop_most` to `FALSE`
+#'    will keep the raw data structure but convert everything into SI units.
+#'    Setting `drop_most` to `TRUE` will result in the `chillR` format.
+#'
+#'    The units are converted as following:
+#'
+#'    *  TEMP   - Mean temperature             (.1 Fahrenheit into Celsius)
+#'    *  DEWP   - Mean dew point               (.1 Fahrenheit into Celsius)
+#'    *  SLP    - Mean sea level pressure      (.1 mb kept as millibar or hektoPascal)
+#'    *  STP    - Mean station pressure        (.1 mb kept as millibar or hektoPascal)
+#'    *  VISIB  - Mean visibility              (.1 miles into kilometer)
+#'    *  WDSP   - Mean wind speed              (.1 knots into meter per second)
+#'    *  MXSPD  - Maximum sustained wind speed (.1 knots into meter per second)
+#'    *  GUST   - Maximum wind gust            (.1 knots into meter per second)
+#'    *  MAX    - Maximum temperature          (.1 Fahrenheit into Celsius)
+#'    *  MIN    - Minimum temperature          (.1 Fahrenheit into Celsius)
+#'    *  PRCP   - Precipitation amount         (.01 inches into millimeter)
+#'    *  SNDP   - Snow depth                   (.1 inches into millimeter)
+#'    *  FRSHTT - Indicator for occurrence of:
+#'
+#'        * Fog, Rain or Drizzle, Snow or Ice Pellets
+#'        * Hail, Thunder, Tornado/Funnel Cloud
+#'
+#' @note
 #' The GSOD database is described here: <https://www.ncei.noaa.gov/access/metadata/landing-page/bin/iso?id=gov.noaa.ncdc:C00516#Documentation>
 #'
 #'    Many databases have data quality flags, which may sometimes indicate that
@@ -100,10 +134,16 @@
 #'    columns include "Attribute", please refer to the GSOD documentation above
 #'    for a more detailed explanation.
 #'
-#'
 #' @author Adrian Fuelle, \email{afuelle@@outlook.de};
 #'    Eike Luedeling, \email{eike@@eikeluedeling.com}
 #' @importFrom magrittr %>%
+#' @importFrom dplyr filter rename mutate arrange rowwise ungroup
+#' @importFrom curl has_internet
+#' @importFrom httr GET write_disk http_error
+#' @importFrom DescTools Overlap
+#' @importFrom padr pad
+#' @importFrom stringr str_extract
+#' @importFrom utils txtProgressBar
 #' @export
 #'
 #' @examples
@@ -114,7 +154,7 @@
 #' lat <- 50.7341602
 #' long <- 7.0871843
 #' stationlist <-
-#'   handle_gsod_new(action = "list_stations",
+#'   handle_gsod_web(action = "list_stations",
 #'                   time_interval = c(1995,2000),
 #'                   location = c(long,lat) # ,
 #'                   # path = "climate_data",              # standard option, can be set to something different
@@ -127,7 +167,7 @@
 #'
 #' ## data download
 #' test_data <-
-#'   handle_gsod_new(action = "download_weather",
+#'   handle_gsod_web(action = "download_weather",
 #'                   time_interval = c(1995,2000),
 #'                   location = stationlist$chillR_code[c(1,2)]#,
 #'                   # end_at_present = F,                 # standard option, can be set to true if time_interval has only one value
@@ -140,7 +180,7 @@
 #'
 #'
 #' ## chillR formating
-#' test_data_clean <- handle_gsod_new(test_data,
+#' test_data_clean <- handle_gsod_web(test_data,
 #'                                    # drop_most = T,     # standard option, can be set to false to keep all columns and only convert to SI units
 #'                                    # add.Date = T       # standard option, can be set to FALSE, but not advised if you want datasets without gaps
 #'                                    )
@@ -148,15 +188,15 @@
 #'
 #' ## data deletion on disk
 #' # functions will ask for confirmation in th console - 'y' for yes to confirm deletion, anything else cancels the deletion
-#' handle_gsod_new(action = "delete",
+#' handle_gsod_web(action = "delete",
 #'                 clean_up = "all")
 #'
-#' handle_gsod_new(action = "delete",
+#' handle_gsod_web(action = "delete",
 #'                 clean_up = "station",
 #'                 location = stationlist$chillR_code[c(1,2)])
 #' }
 #'
-handle_gsod_new <- function(action,
+handle_gsod_web <- function(action,
                             location = NULL,
                             time_interval = NULL,
                             path = "climate_data",
@@ -279,7 +319,7 @@ handle_gsod_new <- function(action,
           if(verbose=="normal")close(pb)
         }
         if(verbose=='detailed') cat("\n\nExplanations:")
-        if(verbose=='detailed') cat("\nLoaded in all specified data raw, if available.\n  Use the function on the dataset again (handle_gsod(dataset_name)) to dop columns and reformat to SI units (?C,liter/m?)")
+        if(verbose=='detailed') cat("\nLoaded in all specified data raw, if available.\n  Use the function on the dataset again (handle_gsod_web(dataset_name)) to drop columns and reformat to SI units (degree Celsius, meter per second ...)")
         if(verbose=='detailed') cat("\nIf datasets couldn't be found, they are missing in the GSOD database.\n  Nevertheless, doublecheck if the correct 'location' and 'time_interval' were choosen.")
         if(verbose=='detailed') cat("\nIf station datasets shouldn't be loaded from disk set 'update_all' to 'TRUE'.\n  This updates/downloads all datasets from the GSOD database and takes a lot longer, if you already have the data partially on disk.")
       }
@@ -420,12 +460,12 @@ handle_gsod_new <- function(action,
           SLP_ATTRIBUTES = data$SLP_ATTRIBUTES,
           STP = ifelse(data$STP == 9999.9,NA,data$STP),
           STP_ATTRIBUTES = data$STP_ATTRIBUTES,
-          VISIB = ifelse(data$VISIB == 999.9,NA,round(data$VISIB*1.609344,3)),
+          VISIB = ifelse(data$VISIB == 999.9,NA,round((data$VISIB*1.609344)*1000,3)),
           VISIB_ATTRIBUTES = data$VISIB_ATTRIBUTES,
-          WDSP = ifelse(data$WDSP == 999.9,NA,round(data$WDSP/0.53996,3)),
+          WDSP = ifelse(data$WDSP == 999.9,NA,round(data$WDSP/1.9438,3)),
           WDSP_ATTRIBUTES = data$WDSP_ATTRIBUTES,
-          MXSPD = ifelse(data$MXSPD == 999.9,NA,round(data$MXSPD/0.53996,3)),
-          GUST = ifelse(data$GUST == 999.9,NA,round(data$GUST/0.53996,3)),
+          MXSPD = ifelse(data$MXSPD == 999.9,NA,round(data$MXSPD/1.9438,3)),
+          GUST = ifelse(data$GUST == 999.9,NA,round(data$GUST/1.9438,3)),
           MAX = ifelse(data$MAX == 9999.9,NA,round((data$Max-32)*5/9,3)),
           MAX_ATTRIBUTES = data$MAX_ATTRIBUTES,
           MIN = ifelse(data$MIN == 9999.9,NA,round(((data$MIN-32)*5/9),3)),
