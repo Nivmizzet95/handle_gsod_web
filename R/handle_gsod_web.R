@@ -142,7 +142,7 @@
 #' @importFrom httr GET write_disk http_error
 #' @importFrom DescTools Overlap
 #' @importFrom padr pad
-#' @importFrom stringr str_extract
+#' @importFrom stringr str_extract str_remove
 #' @importFrom utils txtProgressBar
 #' @export
 #'
@@ -272,6 +272,7 @@ handle_gsod_web <- function(action,
       raw_link <- "https://www.ncei.noaa.gov/data/global-summary-of-the-day/access/"
       time_link <- rep(raw_link, times = amount_of_years) %>%
         paste0(years,"/")
+      location <- stringr::str_remove(location, "_")
       subsets_list <- split(rep(time_link, each = length(location)), location)
       dataset_links <- list()
       for (i in 1:length(location)) {
@@ -364,6 +365,7 @@ handle_gsod_web <- function(action,
       return(all_climate_data)
     }
     if (action == "delete") {
+      location <- stringr::str_remove(location, "_")
       if (clean_up == "all"){
         cat(paste0("Are you sure you want to delete '",getwd(),"/",path,"'?",
                    "\nThis path contains ",length(list.dirs(path))-1," sub-folders, holding ",length(list.files("climate_data",recursive = T))-1," files in total.\n"))
