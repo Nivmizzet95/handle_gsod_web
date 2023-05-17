@@ -280,7 +280,7 @@ handle_gsod_web <- function(action,
           httr::GET("https://www.ncei.noaa.gov/pub/data/noaa/isd-history.csv",
                     httr::write_disk(paste0(path,"/station_list.csv"), overwrite = T)) %>%
             invisible()
-        }
+        }else if(verbose=="detailed"|verbose=="normal") cat("No internet connection detected.")
       }
       stat_list <- read.csv(paste0(path,"/station_list.csv"))  %>%
         dplyr::rename(Long = contains("lo"),
