@@ -275,16 +275,23 @@ handle_gsod_web <- function(action,
       location <- stringr::str_remove(location, "_")
       subsets_list <- split(rep(time_link, each = length(location)), location)
       dataset_links <- list()
+      if (!file.exists(paste0(path,"/station_list.csv"))|update_station_list==T) {
+        if(curl::has_internet()){
+          httr::GET("https://www.ncei.noaa.gov/pub/data/noaa/isd-history.csv",
+                    httr::write_disk(paste0(path,"/station_list.csv"), overwrite = T)) %>%
+            invisible()
+        }
+      }
+      stat_list <- read.csv(paste0(path,"/station_list.csv"))  %>%
+        dplyr::rename(Long = contains("lo"),
+                      Lat = contains("la"),
+                      Elev = contains("ele")) %>%
+        dplyr::mutate(chillR_code = paste(.$USAF, .$WBAN, sep = "")) %>%
+        dplyr::filter(!is.na(Lat)|!is.na(Long))
       for (i in 1:length(location)) {
         dataset_links[i] <- lapply(subsets_list[i],
                                    function(x){paste0(x,names(subsets_list)[i],
                                                       ".csv")})
-        stat_list <- read.csv(paste0(path,"/station_list.csv"))  %>%
-          dplyr::rename(Long = contains("lo"),
-                        Lat = contains("la"),
-                        Elev = contains("ele")) %>%
-          dplyr::mutate(chillR_code = paste(.$USAF, .$WBAN, sep = "")) %>%
-          dplyr::filter(!is.na(Lat)|!is.na(Long))
         names(dataset_links)[i] <-
           dplyr::filter(stat_list, chillR_code == names(subsets_list)[i])$STATION.NAME
       }
